@@ -1,0 +1,50 @@
+---
+- name: playbook to test vmm module
+  hosts: localhost
+  connection: local
+  gather_facts: No
+  become: True
+  become_method: doas
+  vars:
+    xenocara_disk: /tmp/xenocara.img
+  tasks:
+    # XXX: Fail if the host cannot do VMM
+    - name: start and enable vmd
+      service:
+        name: vmd
+        enabled: yes
+        state: started
+    - name: create disk image for xenocara
+      vmm_disk:
+        path: "{{ xenocara_disk }}"
+        size: 8G
+        state: present
+    # For now just use a blockinfile resource until the vm.conf format has settled
+    # then we can use vmm_vm and vmm_switch to administer parts of it.
+    # At least we can populate vm.conf now and trigger a start of the VM with vmm_ctl.
+    - name: define uplink switch
+      become: True
+      become_method: doas
+      blockinfile:
+        marker: '# {mark} ansible managed vether2'
+        dest: /etc/vm.conf
+        block: |
+          switch "uplink" {
+          	add "vether2"
+          }
+    - name: define xenocara vm
+      become: True
+      become_method: doas
+      blockinfile:
+        marker: '# {mark} ansible managed xenocara'
+        dest: /etc/vm.conf
+        block: |
+          vm "xenocara" {
+            memory 1G
+            disk "{{ xenocara_disk }}"
+            kernel "/bsd.rd"
+            interface { switch "uplink" }
+          }
+    - name: start xenocara vm
+      vmm_ctl:
+        state: reloaded
